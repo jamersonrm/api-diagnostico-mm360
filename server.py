@@ -3,12 +3,13 @@ from flask import Flask, request
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
+import os
 
 app = Flask(__name__)
 
 # Configurações da planilha
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-CREDENTIALS_FILE = "credenciais.json"
+CREDENTIALS_FILE = "/etc/secrets/credenciais.json" if os.getenv("RENDER") else "credenciais.json"
 SHEET_NAME = "Planilha de Diagnóstico Leads"
 ABA = "Leads"
 
