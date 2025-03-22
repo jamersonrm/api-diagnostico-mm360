@@ -18,23 +18,8 @@ creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, SCOPE
 client = gspread.authorize(creds)
 sheet = client.open(SHEET_NAME).worksheet(ABA)
 
-@app.route("/")
-def home():
-    return "API de Diagnóstico Online. Use /gerar_diagnostico?linha=X"
-
-@app.route("/gerar_diagnostico", methods=["GET"])
-def gerar_diagnostico():
-    try:
-        linha = int(request.args.get("linha", 2))
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-
-        if linha > len(df):
-            return f"Linha {linha} não encontrada. Total de linhas: {len(df)}"
-
-        lead = df.iloc[linha - 2]
-
-        diagnostico = f"""
+def formatar_diagnostico(lead):
+    return f"""
 🧠 Diagnóstico do Lead: {lead['Nome do Lead']}
 
 📊 Desafio: {lead['Maior Desafio']}
@@ -76,7 +61,40 @@ def gerar_diagnostico():
 ⭐ Diferenciais: {lead['Diferenciais do lead']}
 📝 Observações: {lead['Observações Gerais']}
 """
-        return f"<pre>{diagnostico}</pre>"
+
+@app.route("/")
+def home():
+    return "API de Diagnóstico Online. Use /gerar_diagnostico?linha=X ou /gerar_diagnostico?nome=Fulano"
+
+@app.route("/gerar_diagnostico", methods=["GET"])
+def gerar_diagnostico():
+    try:
+        raw_data = sheet.get_all_values()
+        headers = raw_data[0]
+        values = raw_data[1:]
+
+        df = pd.DataFrame(values, columns=headers)
+        df = df[df['Nome do Lead'].str.strip() != ""]  # remove linhas vazias
+
+        # Busca por linha
+        if 'linha' in request.args:
+            linha = int(request.args.get("linha"))
+            if linha < 2 or linha > (len(df) + 1):
+                return f"Linha {linha} não encontrada. Total de linhas: {len(df)}"
+            lead = df.iloc[linha - 2]
+            return f"<pre>{formatar_diagnostico(lead)}</pre>"
+
+        # Busca por nome
+        elif 'nome' in request.args:
+            nome = request.args.get("nome").strip().lower()
+            match = df[df["Nome do Lead"].str.strip().str.lower() == nome]
+            if match.empty:
+                return f"Lead com nome '{nome}' não encontrado."
+            lead = match.iloc[0]
+            return f"<pre>{formatar_diagnostico(lead)}</pre>"
+
+        else:
+            return "Parâmetro 'linha' ou 'nome' obrigatório."
 
     except Exception as e:
         return f"Erro ao gerar diagnóstico: {str(e)}"
