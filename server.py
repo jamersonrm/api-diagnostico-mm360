@@ -1,45 +1,23 @@
-from diagnostico_bio_instagram_v1 import extrair_bio_instagram
 from flask import Flask, request
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import os
-import unicodedata
 
 app = Flask(__name__)
 
-# Configurações
+# Configurações da planilha
 SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 CREDENTIALS_FILE = "/etc/secrets/credenciais.json" if os.getenv("RENDER") else "credenciais.json"
+SHEET_NAME = "Planilha de Diagnóstico Leads"
+ABA = "Leads"
 
-# Planilhas
-PLANILHA_LEADS = "Planilha de Diagnóstico Leads"
-ABA_LEADS = "Leads"
-PLANILHA_PERSUASAO = "Biblioteca de Diagnósticos Persuasivos - MM360"
-
-# Autenticação
+# Autentica no Google Sheets
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, SCOPE)
 client = gspread.authorize(creds)
+sheet = client.open(SHEET_NAME).worksheet(ABA)
 
-def normalizar(texto):
-    return unicodedata.normalize('NFKD', texto.strip().lower()).encode('ASCII', 'ignore').decode('utf-8')
-
-def formatar_bloco_persuasivo(bloco):
-    return f"""
-🧩 Diagnóstico Persuasivo MM360
-
-🔥 Dor Comum: {bloco.get("Dor Comum", "")}
-📊 Leitura Estratégica: {bloco.get("Leitura Estratégica", "")}
-🚀 Solução com Tráfego Pago: {bloco.get("Solução com Tráfego Pago", "")}
-🧭 Jornada do Cliente: {bloco.get("Jornada do Cliente", "")}
-💬 Frase Pronta: {bloco.get("Frases Persuasivas Prontas", "")}
-📈 Projeção de Retorno: {bloco.get("Projeção de Retorno Sugerida", "")}
-✅ CTA Final: {bloco.get("CTA Final de Fechamento", "")}
-📝 Observações: {bloco.get("Observações Adicionais", "")}
-"""
-
-def formatar_diagnostico(lead, bloco=None):
-    bloco_final = formatar_bloco_persuasivo(bloco) if bloco else ""
+def formatar_diagnostico(lead):
     return f"""
 🧠 Diagnóstico do Lead: {lead['Nome do Lead']}
 
@@ -81,71 +59,44 @@ def formatar_diagnostico(lead, bloco=None):
 
 ⭐ Diferenciais: {lead['Diferenciais do lead']}
 📝 Observações: {lead['Observações Gerais']}
-
-{bloco_final}
 """
+
+@app.route("/")
+def home():
+    return "API de Diagnóstico Online. Use /gerar_diagnostico?linha=X ou /gerar_diagnostico?nome=Fulano"
 
 @app.route("/gerar_diagnostico", methods=["GET"])
 def gerar_diagnostico():
     try:
-        aba_leads = client.open(PLANILHA_LEADS).worksheet(ABA_LEADS)
-        raw_data = aba_leads.get_all_values()
+        raw_data = sheet.get_all_values()
         headers = raw_data[0]
         values = raw_data[1:]
+
         df = pd.DataFrame(values, columns=headers)
-        df = df[df['Nome do Lead'].str.strip() != ""]
+        df = df[df['Nome do Lead'].str.strip() != ""]  # remove linhas vazias
 
-        if 'linha' not in request.args:
-            return "Parâmetro 'linha' obrigatório."
-        linha = int(request.args.get("linha"))
-        if linha < 2 or linha > (len(df) + 1):
-            return f"Linha {linha} não encontrada. Total de linhas: {len(df)}"
-        lead = df.iloc[linha - 2]
+        # Busca por linha
+        if 'linha' in request.args:
+            linha = int(request.args.get("linha"))
+            if linha < 2 or linha > (len(df) + 1):
+                return f"Linha {linha} não encontrada. Total de linhas: {len(df)}"
+            lead = df.iloc[linha - 2]
+            return f"<pre>{formatar_diagnostico(lead)}</pre>"
 
-        nicho_manual = lead.get("Nicho", "").strip().lower()
-        instagram_url = lead.get("Instagram", "").strip()
-        bio_instagram = extrair_bio_instagram(instagram_url) if instagram_url else ""
-        campos_texto = bio_instagram.lower()
+        # Busca por nome
+        elif 'nome' in request.args:
+            nome = request.args.get("nome").strip().lower()
+            match = df[df["Nome do Lead"].str.strip().str.lower() == nome]
+            if match.empty:
+                return f"Lead com nome '{nome}' não encontrado."
+            lead = match.iloc[0]
+            return f"<pre>{formatar_diagnostico(lead)}</pre>"
 
-        possiveis_nichos = ["terapeutas", "psicólogos", "estética", "beleza", "tatuadores", "dentistas", "crossfit"]
-        nicho_detectado = ""
-
-        if nicho_manual:
-            nicho_detectado = nicho_manual
         else:
-            for n in possiveis_nichos:
-                if n in campos_texto:
-                    nicho_detectado = n
-                    break
-
-        # Atualiza planilha se o nicho foi detectado via bio e campo estava vazio
-        if not nicho_manual and nicho_detectado:
-            aba_leads.update_cell(linha, list(df.columns).index("Nicho") + 1, nicho_detectado.title())
-
-        if not nicho_detectado:
-            nicho_detectado = "modelo geral"
-
-        planilha_persuasao = client.open(PLANILHA_PERSUASAO)
-        try:
-            aba_nicho = planilha_persuasao.worksheet(nicho_detectado.title())
-        except:
-            headers = ["Dor Comum","Leitura Estratégica","Solução com Tráfego Pago","Jornada do Cliente",
-                       "Frases Persuasivas Prontas","Projeção de Retorno Sugerida",
-                       "CTA Final de Fechamento","Observações Adicionais"]
-            aba_nicho = planilha_persuasao.add_worksheet(title=nicho_detectado.title(), rows="100", cols=str(len(headers)))
-            aba_nicho.append_row(headers)
-
-        dados_persuasao = aba_nicho.get_all_records()
-        bloco = dados_persuasao[0] if dados_persuasao else {}
-
-        return f"<pre>{formatar_diagnostico(lead, bloco)}</pre>"
+            return "Parâmetro 'linha' ou 'nome' obrigatório."
 
     except Exception as e:
         return f"Erro ao gerar diagnóstico: {str(e)}"
-
-@app.route("/")
-def home():
-    return "API MM360 ativa. Use /gerar_diagnostico?linha=X para rodar o diagnóstico completo."
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
