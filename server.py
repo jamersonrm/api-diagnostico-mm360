@@ -1,4 +1,4 @@
-
+from diagnostico_bio_instagram_v1 import extrair_bio_instagram
 from flask import Flask, request
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -103,9 +103,9 @@ def gerar_diagnostico():
         lead = df.iloc[linha - 2]
 
         nicho_manual = lead.get("Nicho", "").strip().lower()
-        campos_texto = " ".join([lead.get("Bio otimizada (SIM/NÃO)", ""),
-                                 lead.get("Conteúdo focado em vendas (SIM/NÃO)", ""),
-                                 lead.get("Observações Gerais", "")]).lower()
+        instagram_url = lead.get("Instagram", "").strip()
+        bio_instagram = extrair_bio_instagram(instagram_url) if instagram_url else ""
+        campos_texto = bio_instagram.lower()
 
         possiveis_nichos = ["terapeutas", "psicólogos", "estética", "beleza", "tatuadores", "dentistas", "crossfit"]
         nicho_detectado = ""
@@ -117,6 +117,10 @@ def gerar_diagnostico():
                 if n in campos_texto:
                     nicho_detectado = n
                     break
+
+        # Atualiza planilha se o nicho foi detectado via bio e campo estava vazio
+        if not nicho_manual and nicho_detectado:
+            aba_leads.update_cell(linha, list(df.columns).index("Nicho") + 1, nicho_detectado.title())
 
         if not nicho_detectado:
             nicho_detectado = "modelo geral"
