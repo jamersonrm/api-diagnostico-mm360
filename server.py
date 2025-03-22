@@ -1,3 +1,4 @@
+
 from flask import Flask, request
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -83,6 +84,7 @@ def formatar_diagnostico(lead, bloco=None):
 
 {bloco_final}
 """
+
 @app.route("/gerar_diagnostico", methods=["GET"])
 def gerar_diagnostico():
     try:
@@ -100,12 +102,24 @@ def gerar_diagnostico():
             return f"Linha {linha} não encontrada. Total de linhas: {len(df)}"
         lead = df.iloc[linha - 2]
 
+        nicho_manual = lead.get("Nicho", "").strip().lower()
         campos_texto = " ".join([lead.get("Bio otimizada (SIM/NÃO)", ""),
                                  lead.get("Conteúdo focado em vendas (SIM/NÃO)", ""),
                                  lead.get("Observações Gerais", "")]).lower()
 
         possiveis_nichos = ["terapeutas", "psicólogos", "estética", "beleza", "tatuadores", "dentistas", "crossfit"]
-        nicho_detectado = next((n for n in possiveis_nichos if n in campos_texto), "Modelo Geral")
+        nicho_detectado = ""
+
+        if nicho_manual:
+            nicho_detectado = nicho_manual
+        else:
+            for n in possiveis_nichos:
+                if n in campos_texto:
+                    nicho_detectado = n
+                    break
+
+        if not nicho_detectado:
+            nicho_detectado = "modelo geral"
 
         planilha_persuasao = client.open(PLANILHA_PERSUASAO)
         try:
@@ -131,4 +145,3 @@ def home():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
-
